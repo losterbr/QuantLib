@@ -261,7 +261,8 @@ BOOST_AUTO_TEST_CASE(testNormal) {
     std::transform(x.begin(), x.end(), temp.begin(), normal);
     std::transform(y.begin(), y.end(), temp.begin(), diff.begin(), std::minus<>());
     Real e = norm(diff.begin(), diff.end(), h);
-    if (e > 1.0e-16) {
+    const Real densityTolerance = 1.0e-16;
+    if (e > densityTolerance) {
         BOOST_ERROR("norm of C++ NormalDistribution minus analytic Gaussian: "
                     << std::scientific << e << "\n"
                     << "tolerance exceeded");
@@ -272,7 +273,8 @@ BOOST_AUTO_TEST_CASE(testNormal) {
     std::transform(temp.begin(), temp.end(), temp.begin(), invCum);
     std::transform(x.begin(), x.end(), temp.begin(), diff.begin(), std::minus<>());
     e = norm(diff.begin(), diff.end(), h);
-    if (e > 1.0e-7) {
+    const Real inverseTolerance = 1.0e-7;
+    if (e > inverseTolerance) {
         BOOST_ERROR("norm of invCum . cum minus identity: "
                     << std::scientific << e << "\n"
                     << "tolerance exceeded");
@@ -285,7 +287,7 @@ BOOST_AUTO_TEST_CASE(testNormal) {
                    });
 
     e = norm(diff.begin(), diff.end(), h);
-    if (e > 1.0e-7) {
+    if (e > inverseTolerance) {
         BOOST_ERROR("norm of MaddockInvCum . cum minus identity: "
                     << std::scientific << e << "\n"
                     << "tolerance exceeded");
@@ -296,7 +298,7 @@ BOOST_AUTO_TEST_CASE(testNormal) {
         temp[i] = cum.derivative(x[i]);
     std::transform(y.begin(), y.end(), temp.begin(), diff.begin(), std::minus<>());
     e = norm(diff.begin(), diff.end(), h);
-    if (e > 1.0e-16) {
+    if (e > densityTolerance) {
         BOOST_ERROR(
             "norm of C++ Cumulative.derivative minus analytic Gaussian: "
             << std::scientific << e << "\n"
@@ -308,7 +310,7 @@ BOOST_AUTO_TEST_CASE(testNormal) {
         temp[i] = normal.derivative(x[i]);
     std::transform(yd.begin(), yd.end(), temp.begin(), diff.begin(), std::minus<>());
     e = norm(diff.begin(), diff.end(), h);
-    if (e > 1.0e-16) {
+    if (e > densityTolerance) {
         BOOST_ERROR("norm of C++ Normal.derivative minus analytic derivative: "
                     << std::scientific << e << "\n"
                     << "tolerance exceeded");
@@ -380,25 +382,28 @@ BOOST_AUTO_TEST_CASE(testMoroInverseCumulativeNormal) {
     // at |p - 0.5| = 0.42, corresponding to p = 0.08 and p = 0.92.
     const Real moroBoundaryProbabilities[] = { 0.08, 0.080001,
                                                 0.919999, 0.92 };
+    const Real referenceTolerance = 1.0e-3;
     for (Real probability : moroBoundaryProbabilities) {
         BOOST_CHECK(std::isfinite(moroInvCum(probability)));
         // Acklam provides a more accurate independent reference here.
-        BOOST_CHECK_CLOSE(moroInvCum(probability), invCum(probability), 1.0e-3);
+        BOOST_CHECK_CLOSE(moroInvCum(probability), invCum(probability),
+                          referenceTolerance);
         // Boost.Math provides a second independent reference for the tails.
         BOOST_CHECK_CLOSE(moroInvCum(probability),
                           boost::math::quantile(standardNormal, probability),
-                          1.0e-3);
+                          referenceTolerance);
     }
 
     // The two approximations should not introduce a visible jump at the switch.
+    const Real continuityTolerance = 1.0e-4;
     BOOST_CHECK_SMALL(
         std::fabs((moroInvCum(0.080001) - moroInvCum(0.08)) -
                   (invCum(0.080001) - invCum(0.08))),
-        1.0e-4); // absolute continuity tolerance
+        continuityTolerance);
     BOOST_CHECK_SMALL(
         std::fabs((moroInvCum(0.92) - moroInvCum(0.919999)) -
                   (invCum(0.92) - invCum(0.919999))),
-        1.0e-4); // absolute continuity tolerance
+        continuityTolerance);
     BOOST_CHECK_THROW(MoroInverseCumulativeNormal(0.0, -1.0), Error);
     BOOST_CHECK_THROW(MoroInverseCumulativeNormal(
                           0.0, std::numeric_limits<Real>::quiet_NaN()), Error);
@@ -923,7 +928,7 @@ BOOST_AUTO_TEST_CASE(testBivariateCumulativeStudent) {
             if (std::fabs(calculated2 - reference2) > tolerance)
                 BOOST_ERROR("Failed to reproduce CDF value at " << xs[j] <<
                             "\n    calculated: " << calculated2 <<
-                            "\n    expected:   " << reference1);
+                            "\n    expected:   " << reference2);
 		}
 	}
 
@@ -1053,15 +1058,16 @@ BOOST_AUTO_TEST_CASE(testBivariateCumulativeStudentBoundaryContinuity) {
     BOOST_CHECK_SMALL(symmetric(0.75, -1.25) - symmetric(-1.25, 0.75), tolerance);
 
     Real epsilon = 1.0e-7;
+    Real boundaryTolerance = 1.0e-6;
     BOOST_CHECK_SMALL(perfectlyPositive(1.0, 1.0 + epsilon) -
                          perfectlyPositive(1.0, 1.0 - epsilon),
-                     1.0e-6);
+                     boundaryTolerance);
     BOOST_CHECK_SMALL(perfectlyNegative(1.0, -1.0 + epsilon) -
                          perfectlyNegative(1.0, -1.0 + 2.0 * epsilon),
-                     1.0e-6);
+                     boundaryTolerance);
     BOOST_CHECK_SMALL(perfectlyNegative(1.0, -1.0 - epsilon) -
                          perfectlyNegative(1.0, -1.0 - 2.0 * epsilon),
-                     1.0e-6);
+                     boundaryTolerance);
 }
 
 BOOST_AUTO_TEST_CASE(testBivariateCumulativeStudentVsBivariate) {
@@ -1124,7 +1130,8 @@ BOOST_AUTO_TEST_CASE(testInvCDFviaStochasticCollocation) {
         const Real calculated2 = scInvCDF10.value(x);
         const Real expected = invCDF(u);
 
-        if (std::fabs(calculated1 - calculated2) > 1e-6) {
+        const Real consistencyTolerance = 1.0e-6;
+        if (std::fabs(calculated1 - calculated2) > consistencyTolerance) {
             BOOST_FAIL("Failed to reproduce equal stochastic collocation "
                        "inverse CDF" <<
                        "\n    x: " << x <<
@@ -1135,15 +1142,15 @@ BOOST_AUTO_TEST_CASE(testInvCDFviaStochasticCollocation) {
                        "\n    diff: " << calculated1 - calculated2);
         }
 
-        const Real tol = 1e-2;
-        if (std::fabs(calculated2 - expected) > tol) {
+        const Real approximationTolerance = 1.0e-2;
+        if (std::fabs(calculated2 - expected) > approximationTolerance) {
             BOOST_FAIL("Failed to reproduce invCDF with "
                        "stochastic collocation method" <<
                        "\n    x: " << x <<
                        "\n    invCDF  :" << expected <<
                        "\n    scInvCDF: " << calculated2 <<
                        "\n    diff    : " << std::fabs(expected-calculated2) <<
-                       "\n    tol     : " << tol);
+                       "\n    tol     : " << approximationTolerance);
         }
     }
 
@@ -1155,15 +1162,15 @@ BOOST_AUTO_TEST_CASE(testInvCDFviaStochasticCollocation) {
         const Real expected = invCDF(u);
         const Real calculated = scInvCDF30(u);
 
-        const Real tol = 1e-6;
-        if (std::fabs(calculated - expected) > tol) {
+        const Real highPrecisionTolerance = 1.0e-6;
+        if (std::fabs(calculated - expected) > highPrecisionTolerance) {
             BOOST_FAIL("Failed to reproduce invCDF with "
                        "stochastic collocation method" <<
                        "\n    x: " << x <<
                        "\n    invCDF  :" << expected <<
                        "\n    scInvCDF: " << calculated <<
                        "\n    diff    : " << std::fabs(expected-calculated) <<
-                       "\n    tol     : " << tol);
+                       "\n    tol     : " << highPrecisionTolerance);
         }
     }
 }
@@ -1175,7 +1182,7 @@ BOOST_AUTO_TEST_CASE(testSankaranApproximation) {
     const Real dfs[] = {2,2,2,4,4};
     const Real ncps[] = {1,2,3,1,2,3};
 
-    const Real tol = 0.01;
+    const Real tolerance = 0.01;
     for (Real df : dfs) {
         for (Real ncp : ncps) {
             const NonCentralCumulativeChiSquareDistribution d(df, ncp);
@@ -1186,7 +1193,7 @@ BOOST_AUTO_TEST_CASE(testSankaranApproximation) {
                 const Real calculated = sankaran(x);
                 const Real diff = std::fabs(expected - calculated);
 
-                if (diff > tol) {
+                if (diff > tolerance) {
                     BOOST_ERROR("Failed to match accuracy of Sankaran approximation"""
                            "\n    df        : " << df <<
                            "\n    ncp       : " << ncp <<
@@ -1194,7 +1201,7 @@ BOOST_AUTO_TEST_CASE(testSankaranApproximation) {
                            "\n    expected  : " << expected <<
                            "\n    calculated: " << calculated <<
                            "\n    diff      : " << diff <<
-                           "\n    tol       : " << tol);
+                           "\n    tol       : " << tolerance);
                 }
             }
         }
