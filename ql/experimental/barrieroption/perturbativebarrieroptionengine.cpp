@@ -23,6 +23,7 @@
 #include <ql/errors.hpp>
 #include <ql/exercise.hpp>
 #include <ql/experimental/barrieroption/perturbativebarrieroptionengine.hpp>
+#include <ql/math/functional.hpp>
 #include <ql/mathconstants.hpp>
 #include <ql/types.hpp>
 #include <functional>
@@ -461,18 +462,18 @@ namespace QuantLib {
         normalizationFactor=exp((a-b)*(a-b)/(4.0*tt))*commonScale;
         caux=-caux/normalizationFactor;
 
-        const Real xDenominator = std::sqrt(2.0*tt*p*(tt-p));
-        const Real yDenominator = std::sqrt(2.0*tt*s*(tt-s));
+        const Real inverseXDenominator = 1.0/std::sqrt(2.0*tt*p*(tt-p));
+        const Real inverseYDenominator = 1.0/std::sqrt(2.0*tt*s*(tt-s));
         const Real xCorrelation = std::sqrt((s*(tt-p))/(p*(tt-s)));
-        xx=(a*p+b*(tt-p))/xDenominator;
-        yy=(a*s+b*(tt-s))/yDenominator;
+        xx=(a*p+b*(tt-p))*inverseXDenominator;
+        yy=(a*s+b*(tt-s))*inverseYDenominator;
         caux1=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux1=caux1/normalizationFactor;
 
         normalizationFactor=exp((a+b)*(a+b)/(4.0*tt))*commonScale;
 
-        xx=(a*p-b*(tt-p))/xDenominator;
-        yy=(a*s-b*(tt-s))/yDenominator;
+        xx=(a*p-b*(tt-p))*inverseXDenominator;
+        yy=(a*s-b*(tt-s))*inverseYDenominator;
         caux2=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux2=caux2/normalizationFactor;
         return (caux+caux1+caux2)/(2.0*M_SQRTPI);
@@ -488,20 +489,20 @@ namespace QuantLib {
         Real caux,caux1,caux2;
         Real xx,yy;
 
-        const Real xDenominator = std::sqrt(2.0*(tt-p));
-        const Real yDenominator = std::sqrt(2.0*(tt-s));
+        const Real inverseXDenominator = 1.0/std::sqrt(2.0*(tt-p));
+        const Real inverseYDenominator = 1.0/std::sqrt(2.0*(tt-s));
         const Real xCorrelation = std::sqrt((tt-p)/(tt-s));
 
-        xx=(a-b*(tt-p))/xDenominator;
+        xx=(a-b*(tt-p))*inverseXDenominator;
         caux=-standardNormalCumulativeProbability(xx)*exp(-0.5*a*b);
 
-        xx=(a+b*(tt-p))/xDenominator;
-        yy=(a+b*(tt-s))/yDenominator;
+        xx=(a+b*(tt-p))*inverseXDenominator;
+        yy=(a+b*(tt-s))*inverseYDenominator;
         caux1=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux1=exp(0.5*a*b)*caux1;
 
-        xx=(a-b*(tt-p))/xDenominator;
-        yy=(a-b*(tt-s))/yDenominator;
+        xx=(a-b*(tt-p))*inverseXDenominator;
+        yy=(a-b*(tt-s))*inverseYDenominator;
         caux2=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux2=exp(-0.5*a*b)*caux2;
 
@@ -522,25 +523,25 @@ namespace QuantLib {
         Real sigmarho[4],limit[4],epsi;
 
         epsi=1.e-12;
-        const Real pDenominator = std::sqrt(2.0*(tt-p));
-        const Real sDenominator = std::sqrt(2.0*(tt-s));
-        const Real tDenominator = std::sqrt(2.0*tt);
+        const Real inversePDenominator = 1.0/std::sqrt(2.0*(tt-p));
+        const Real inverseSDenominator = 1.0/std::sqrt(2.0*(tt-s));
+        const Real inverseTDenominator = 1.0/std::sqrt(2.0*tt);
         const Real pToSCorrelation = std::sqrt((tt-p)/(tt-s));
         const Real pToTCorrelation = std::sqrt((tt-p)/tt);
         const Real sToTCorrelation = std::sqrt((tt-s)/tt);
 
-        limit[1]=(a+b*(tt-p))/pDenominator;
-        limit[2]=(a+b*(tt-s))/sDenominator;
-        limit[3]=(a+b*tt+c)/tDenominator;
+        limit[1]=(a+b*(tt-p))*inversePDenominator;
+        limit[2]=(a+b*(tt-s))*inverseSDenominator;
+        limit[3]=(a+b*tt+c)*inverseTDenominator;
         sigmarho[1]=pToSCorrelation;
         sigmarho[2]=pToTCorrelation;
         sigmarho[3]=sToTCorrelation;
 
         caux=exp(0.5*a*b)*trivariateNormalOrStudentCumulativeProbability(0,limit,sigmarho,epsi);
 
-        limit[1]=(a-b*(tt-p))/pDenominator;
-        limit[2]=(-a+b*(tt-s))/sDenominator;
-        limit[3]=(-a+b*tt+c)/tDenominator;
+        limit[1]=(a-b*(tt-p))*inversePDenominator;
+        limit[2]=(-a+b*(tt-s))*inverseSDenominator;
+        limit[3]=(-a+b*tt+c)*inverseTDenominator;
         sigmarho[1]=-pToSCorrelation;
         sigmarho[2]=-pToTCorrelation;
         sigmarho[3]=sToTCorrelation;
@@ -562,44 +563,48 @@ namespace QuantLib {
         Real aa,caux,caux1,caux2,caux3,caux4;
         Real xx,yy;
 
-        const Real pDenominator = std::sqrt(2.0*(tt-p));
-        const Real sDenominator = std::sqrt(2.0*(tt-s));
-        const Real jointDenominator = std::sqrt(2.0*(tt-p)*(tt-s));
+        const Real inversePDenominator = 1.0/std::sqrt(2.0*(tt-p));
+        const Real inverseSDenominator = 1.0/std::sqrt(2.0*(tt-s));
+        const Real inverseJointDenominator = 1.0/std::sqrt(2.0*(tt-p)*(tt-s));
         const Real pMinusSqrt = std::sqrt(p-s);
-        const Real pDensityScale = 2.0*std::sqrt(M_PI*(tt-p));
-        const Real sDensityScale = 2.0*std::sqrt(M_PI*(tt-s));
+        const Real inversePDensityScale = 1.0/(2.0*std::sqrt(M_PI*(tt-p)));
+        const Real inverseSDensityScale = 1.0/(2.0*std::sqrt(M_PI*(tt-s)));
         const Real xCorrelation = std::sqrt((tt-p)/(tt-s));
 
-        xx=(a-b*(tt-p))/pDenominator;
+        xx=(a-b*(tt-p))*inversePDenominator;
         caux=standardNormalCumulativeProbability(xx)*exp(-0.5*a*b);
 
-        xx=(a+b*(tt-p))/pDenominator;
-        yy=(a+b*(tt-s))/sDenominator;
+        xx=(a+b*(tt-p))*inversePDenominator;
+        yy=(a+b*(tt-s))*inverseSDenominator;
         caux1=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux1=exp(0.5*a*b)*caux1;
 
-        xx=(a-b*(tt-p))/pDenominator;
-        yy=(a-b*(tt-s))/sDenominator;
+        xx=(a-b*(tt-p))*inversePDenominator;
+        yy=(a-b*(tt-s))*inverseSDenominator;
         caux2=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux2=-exp(-0.5*a*b)*caux2;
 
         caux=0.5*b*(caux+caux1+caux2);
 
-        xx=(a+b*(tt-p))/std::sqrt(2.0*(tt-p));
+        xx=(a+b*(tt-p))*inversePDenominator;
         yy=b*pMinusSqrt/M_SQRT2;
-        caux1=exp(-0.5*xx*xx)*exp(0.5*a*b)*standardNormalCumulativeProbability(yy)/pDensityScale;
+        caux1=exp(-0.5*xx*xx)*exp(0.5*a*b)*
+            standardNormalCumulativeProbability(yy)*inversePDensityScale;
 
-        xx=(a+b*(tt-s))/sDenominator;
-        yy=a*pMinusSqrt/jointDenominator;
-        caux2=exp(-0.5*xx*xx)*exp(0.5*a*b)*standardNormalCumulativeProbability(yy)/sDensityScale;
+        xx=(a+b*(tt-s))*inverseSDenominator;
+        yy=a*pMinusSqrt*inverseJointDenominator;
+        caux2=exp(-0.5*xx*xx)*exp(0.5*a*b)*
+            standardNormalCumulativeProbability(yy)*inverseSDensityScale;
 
-        xx=(a-b*(tt-p))/pDenominator;
+        xx=(a-b*(tt-p))*inversePDenominator;
         yy=b*pMinusSqrt/M_SQRT2;
-        caux3=-exp(-0.5*xx*xx)*exp(-0.5*a*b)*standardNormalCumulativeProbability(yy)/pDensityScale;
+        caux3=-exp(-0.5*xx*xx)*exp(-0.5*a*b)*
+            standardNormalCumulativeProbability(yy)*inversePDensityScale;
 
-        xx=(a-b*(tt-s))/sDenominator;
-        yy=a*pMinusSqrt/jointDenominator;
-        caux4=exp(-0.5*xx*xx)*exp(-0.5*a*b)*standardNormalCumulativeProbability(yy)/sDensityScale;
+        xx=(a-b*(tt-s))*inverseSDenominator;
+        yy=a*pMinusSqrt*inverseJointDenominator;
+        caux4=exp(-0.5*xx*xx)*exp(-0.5*a*b)*
+            standardNormalCumulativeProbability(yy)*inverseSDensityScale;
 
         aa=exp((b*b-(1.0-gm)*(1.0-gm))*(tt-p)/4.0);
 
@@ -619,39 +624,40 @@ namespace QuantLib {
         Real epsi;
 
         epsi=1.e-12;
-        const Real pDenominator = std::sqrt(2.0*(tt-p));
-        const Real sDenominator = std::sqrt(2.0*(tt-s));
-        const Real tDenominator = std::sqrt(2.0*tt);
+        const Real inversePDenominator = 1.0/std::sqrt(2.0*(tt-p));
+        const Real inverseSDenominator = 1.0/std::sqrt(2.0*(tt-s));
+        const Real inverseTDenominator = 1.0/std::sqrt(2.0*tt);
         const Real pToSCorrelation = std::sqrt((tt-p)/(tt-s));
         const Real pToTCorrelation = std::sqrt((tt-p)/tt);
         const Real sToTCorrelation = std::sqrt((tt-s)/tt);
 
-        limit[1]=(ax+bx*(tt-p))/pDenominator;
-        limit[2]=(ax+bx*(tt-s))/sDenominator;
-        limit[3]=(ax+bx*tt+c)/tDenominator;
+        limit[1]=(ax+bx*(tt-p))*inversePDenominator;
+        limit[2]=(ax+bx*(tt-s))*inverseSDenominator;
+        limit[3]=(ax+bx*tt+c)*inverseTDenominator;
         sigmarho[1]=pToSCorrelation;
         sigmarho[2]=pToTCorrelation;
         sigmarho[3]=sToTCorrelation;
-        sigma[1]=std::sqrt(1.0-pToSCorrelation*pToSCorrelation);
-        sigma[2]=std::sqrt(1.0-pToTCorrelation*pToTCorrelation);
-        sigma[3]=std::sqrt(1.0-sToTCorrelation*sToTCorrelation);
+        sigma[1]=std::sqrt(1.0-squared(pToSCorrelation));
+        sigma[2]=std::sqrt(1.0-squared(pToTCorrelation));
+        sigma[3]=std::sqrt(1.0-squared(sToTCorrelation));
 
         caux=0.5*bx*trivariateNormalOrStudentCumulativeProbability(0,limit,sigmarho,epsi);
 
         idx=1;
-        caux=caux+derivn3(limit,sigmarho,sigma,idx)/pDenominator;
+        caux=caux+derivn3(limit,sigmarho,sigma,idx)*inversePDenominator;
 
         idx=2;
-        caux=caux+derivn3(limit,sigmarho,sigma,idx)/sDenominator;
+        caux=caux+derivn3(limit,sigmarho,sigma,idx)*inverseSDenominator;
 
         idx=3;
-        caux=caux+derivn3(limit,sigmarho,sigma,idx)/tDenominator;
+        caux=caux+derivn3(limit,sigmarho,sigma,idx)*inverseTDenominator;
 
         caux=exp(0.5*ax*bx)*caux;
 
-        limit[1]=(ax-bx*(tt-p))/pDenominator;
-        limit[2]=(-ax+bx*(tt-s))/sDenominator;
-        limit[3]=(-ax+bx*tt+c)/tDenominator;
+        // sigma depends on correlation magnitudes, so sign changes do not require recomputing it.
+        limit[1]=(ax-bx*(tt-p))*inversePDenominator;
+        limit[2]=(-ax+bx*(tt-s))*inverseSDenominator;
+        limit[3]=(-ax+bx*tt+c)*inverseTDenominator;
         sigmarho[1]=-pToSCorrelation;
         sigmarho[2]=-pToTCorrelation;
         sigmarho[3]=sToTCorrelation;
@@ -659,13 +665,13 @@ namespace QuantLib {
         caux1=0.5*bx*trivariateNormalOrStudentCumulativeProbability(0,limit,sigmarho,epsi);
 
         idx=1;
-        caux1=caux1-derivn3(limit,sigmarho,sigma,idx)/pDenominator;
+        caux1=caux1-derivn3(limit,sigmarho,sigma,idx)*inversePDenominator;
 
         idx=2;
-        caux1=caux1+derivn3(limit,sigmarho,sigma,idx)/sDenominator;
+        caux1=caux1+derivn3(limit,sigmarho,sigma,idx)*inverseSDenominator;
 
         idx=3;
-        caux1=caux1+derivn3(limit,sigmarho,sigma,idx)/tDenominator;
+        caux1=caux1+derivn3(limit,sigmarho,sigma,idx)*inverseTDenominator;
 
         caux1=exp(-0.5*ax*bx)*caux1;
 
