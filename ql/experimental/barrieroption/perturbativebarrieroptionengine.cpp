@@ -23,6 +23,7 @@
 #include <ql/errors.hpp>
 #include <ql/exercise.hpp>
 #include <ql/experimental/barrieroption/perturbativebarrieroptionengine.hpp>
+#include <ql/mathconstants.hpp>
 #include <ql/types.hpp>
 #include <functional>
 #include <algorithm>
@@ -33,7 +34,7 @@ using namespace std;
 
 namespace {
 
-    inline QuantLib::Real SIGN(const QuantLib::Real& a, const QuantLib::Real& b) 
+    inline QuantLib::Real signedMagnitude(const QuantLib::Real& a, const QuantLib::Real& b)
     {
         if (b > 0.0) 
             return std::fabs(a);
@@ -47,18 +48,11 @@ namespace QuantLib {
 
     namespace {
 
-    constexpr double PI = 3.14159265358979324;
-    constexpr double halfPi = PI / 2.0;
-    constexpr double twoPi = 2.0 * PI;
-    constexpr double sqrtTwo = 1.4142135623730950488;
-    constexpr double sqrtPi = 1.7724538509055160273;
-    constexpr double sqrtTwoPi = sqrtTwo * sqrtPi;
-
     // TODO: review these local distribution helpers against the existing
     // QuantLib implementations before consolidating them.
-    Real ND2(Real a, Real b, Real rho);
+    Real bivariateNormalUpperTailProbability(Real a, Real b, Real rho);
     // standard normal cumulative distribution function
-    Real PHID(Real Z);
+    Real standardNormalCumulativeProbability(Real Z);
 
     // Functions used to compute the first order approximation
     Real ff(Real p,Real tt,Real a, Real b, Real gm);
@@ -77,7 +71,11 @@ namespace QuantLib {
                 Real c, Real gm);
     Real dvv(Real s,Real p,Real tt,Real a,Real b,Real gm);
     Real dff(Real s, Real p,Real tt,Real a,Real b,Real gm);
-    Real tvtl(int jj, const Real limit[4], const Real sigmarho[4], Real epsi);
+    Real trivariateNormalOrStudentCumulativeProbability(
+        int degreesOfFreedom,
+        const Real limit[4],
+        const Real sigmarho[4],
+        Real tolerance);
 
     template <class Integr, class IntegralAlpha, class IntegralVariance,
               class Alpha, class SigmaQ>
@@ -101,7 +99,6 @@ namespace QuantLib {
         Real xstar=0.0, s0=0.0;
         Real sigmat=0.0, disc=0.0, d1=0.0,d2=0.0,d3=0.0,d4=0.0;
         Real et=0.0,tt=0.0, dt=0.0,p=0.0;
-        Real dsqpi;
         Real caux=0.0,ccaux=0.0;
         Real auxnew=0.0;
         Real x=0.0,b=0.0,c=0.0;
@@ -159,10 +156,10 @@ namespace QuantLib {
         d3=scaledPlusGammaNumerator-scaledLogS0;
         d4=scaledPlusGammaNumerator+scaledLogS0;
 
-        e1=PHID(d1);
-        e2=PHID(d2);
-        e3=PHID(d3);
-        e4=PHID(d4);
+        e1=standardNormalCumulativeProbability(d1);
+        e2=standardNormalCumulativeProbability(d2);
+        e3=standardNormalCumulativeProbability(d3);
+        e4=standardNormalCumulativeProbability(d4);
 
         v0=kprice*e1-kprice*exp(oneMinusGamma*x)*e2;
         v0=v0+exp(gm*halfSigmat)*(-hbarr*s0*e3+hbarr*exp(-gm*x)*e4);
@@ -183,8 +180,6 @@ namespace QuantLib {
         tt=0.5*integs(taumin,taumax);
 
         et=exp(0.5*(1.0-gm)*x);
-
-        dsqpi=sqrtPi;
 
         v1=0.0;
         for( i=1;i<=npoint;i++) {
@@ -238,7 +233,7 @@ namespace QuantLib {
             v1=v1+(alpha(tmp)-gm*0.5*sigmaq(tmp))*v1p;
         }
 
-        v1=exp(disc)*et*v1*dt/(dsqpi*2.0);
+        v1=exp(disc)*et*v1*dt/(M_SQRTPI*2.0);
 
         if(iord==1) return v0+v1;
 
@@ -319,8 +314,7 @@ namespace QuantLib {
         return v0+v1+v2;
     }
 
-
-    Real PHID(Real Z){
+    Real standardNormalCumulativeProbability(Real Z){
         /*
          *     Normal distribution probabilities accurate to 1D-15.
          *     Z = number of standard deviations from the mean.
@@ -375,14 +369,13 @@ namespace QuantLib {
               |Z| >= CUTOFF.
             */
             else
-                P = EXPNTL/(ZABS + 1/(ZABS + 2/(ZABS + 3/(ZABS + 4/(ZABS + 0.65)))))/sqrtTwoPi;
+                P = EXPNTL/(ZABS + 1/(ZABS + 2/(ZABS + 3/(ZABS + 4/(ZABS + 0.65)))))/(M_SQRT2*M_SQRTPI);
 
         }
         if ( Z > 0 ) P = 1 - P;
 
         return(P);
     }
-
 
     /*
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -398,17 +391,14 @@ namespace QuantLib {
       !!
     */
     Real ff(Real p,Real tt,Real a, Real b, Real gm) {
-        Real phid;
         Real aa, caux;
 
         aa=-(b*p-b*tt+a)/std::sqrt(2.0*(tt-p));
 
-        caux=2.0*sqrtPi*PHID(aa);
+        caux=2.0*M_SQRTPI*standardNormalCumulativeProbability(aa);
         aa=b*b-(1.0-gm)*(1.0-gm);
         aa=aa/4.0;
-        phid=exp(-0.5*a*b)*exp(aa*(tt-p))*caux;
-
-        return phid;
+        return exp(-0.5*a*b)*exp(aa*(tt-p))*caux;
     }
 
     /*
@@ -418,16 +408,13 @@ namespace QuantLib {
     */
     Real v(Real p, Real tt,Real a,Real b,Real gm)
     {
-        Real result;
         Real aa,caux;
 
         aa=-(p*(a-b)+b*tt)/std::sqrt(2.0*p*tt*(tt-p));
-        caux=PHID(aa);
+        caux=standardNormalCumulativeProbability(aa);
 
         aa=exp((a-b)*(a-b)/(4.0*tt))*exp((1.0-gm)*(1.0-gm)*tt/4.0)*std::sqrt(tt);
-        result=caux/aa;
-
-        return(result);
+        return caux/aa;
     }
 
     /*
@@ -436,7 +423,6 @@ namespace QuantLib {
       !!
     */
     Real llold(Real p,Real tt, Real a, Real b,Real c, Real gm){
-        Real bvnd;
         Real xx,yy,rho,caux;
         Real aa;
 
@@ -445,10 +431,9 @@ namespace QuantLib {
         rho=std::sqrt((tt-p)/tt);
         aa=b*b-(1.0-gm)*(1.0-gm);
         aa=aa/4.0;
-        caux=ND2(-xx,-yy,rho);
+        caux=bivariateNormalUpperTailProbability(-xx,-yy,rho);
 
-        bvnd=2.0*sqrtPi*exp(-a*b*0.5)*exp(aa*(tt-p))*caux;
-        return(bvnd);
+        return 2.0*M_SQRTPI*exp(-a*b*0.5)*exp(aa*(tt-p))*caux;
     }
 
     /*
@@ -466,32 +451,31 @@ namespace QuantLib {
     */
     Real dvv(Real s,Real p,Real tt,Real a,Real b,Real gm)
     {
-        Real result;
-        Real aa,caux,caux1,caux2;
-        Real xx,yy,rho;
+        Real normalArgument, normalizationFactor, caux, caux1, caux2;
+        Real xx,yy;
 
-        aa=(a*p+b*(tt-p))/std::sqrt(2.0*p*tt*(tt-p));
-        caux=PHID(aa);
+        normalArgument=(a*p+b*(tt-p))/std::sqrt(2.0*p*tt*(tt-p));
+        caux=standardNormalCumulativeProbability(normalArgument);
 
-        aa=exp((a-b)*(a-b)/(4.0*tt))*exp((1.0-gm)*(1.0-gm)*tt/4.0)*std::sqrt(tt);
-        caux=-caux/aa;
+        const Real commonScale = exp((1.0-gm)*(1.0-gm)*tt/4.0)*std::sqrt(tt);
+        normalizationFactor=exp((a-b)*(a-b)/(4.0*tt))*commonScale;
+        caux=-caux/normalizationFactor;
 
-        xx=(a*p+b*(tt-p))/std::sqrt(2.0*tt*p*(tt-p));
-        yy=(a*s+b*(tt-s))/std::sqrt(2.0*tt*s*(tt-s));
-        rho=std::sqrt((s*(tt-p))/(p*(tt-s)));
-        caux1=ND2(-xx,-yy,rho);
-        caux1=caux1/aa;
+        const Real xDenominator = std::sqrt(2.0*tt*p*(tt-p));
+        const Real yDenominator = std::sqrt(2.0*tt*s*(tt-s));
+        const Real xCorrelation = std::sqrt((s*(tt-p))/(p*(tt-s)));
+        xx=(a*p+b*(tt-p))/xDenominator;
+        yy=(a*s+b*(tt-s))/yDenominator;
+        caux1=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
+        caux1=caux1/normalizationFactor;
 
+        normalizationFactor=exp((a+b)*(a+b)/(4.0*tt))*commonScale;
 
-        aa=exp((a+b)*(a+b)/(4.0*tt))*exp((1.0-gm)*(1.0-gm)*tt/4.0)*std::sqrt(tt);
-
-        xx=(a*p-b*(tt-p))/std::sqrt(2.0*tt*p*(tt-p));
-        yy=(a*s-b*(tt-s))/std::sqrt(2.0*tt*s*(tt-s));
-        rho=std::sqrt((s*(tt-p))/(p*(tt-s)));
-        caux2=ND2(-xx,-yy,rho);
-        caux2=caux2/aa;
-        result=(caux+caux1+caux2)/(2.0*sqrtPi);
-        return(result);
+        xx=(a*p-b*(tt-p))/xDenominator;
+        yy=(a*s-b*(tt-s))/yDenominator;
+        caux2=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
+        caux2=caux2/normalizationFactor;
+        return (caux+caux1+caux2)/(2.0*M_SQRTPI);
     }
 
     /*
@@ -501,31 +485,31 @@ namespace QuantLib {
     */
     Real dff(Real s, Real p,Real tt,Real a,Real b,Real gm)
     {
-        Real result;
-        Real aa,caux,caux1,caux2;
-        Real xx,yy,rho;
+        Real caux,caux1,caux2;
+        Real xx,yy;
 
-        xx=(a-b*(tt-p))/std::sqrt(2.0*(tt-p));
-        caux=-PHID(xx)*exp(-0.5*a*b);
+        const Real xDenominator = std::sqrt(2.0*(tt-p));
+        const Real yDenominator = std::sqrt(2.0*(tt-s));
+        const Real xCorrelation = std::sqrt((tt-p)/(tt-s));
 
-        xx=(a+b*(tt-p))/std::sqrt(2.0*(tt-p));
-        yy=(a+b*(tt-s))/std::sqrt(2.0*(tt-s));
-        rho=std::sqrt((tt-p)/(tt-s));
-        caux1=ND2(-xx,-yy,rho);
+        xx=(a-b*(tt-p))/xDenominator;
+        caux=-standardNormalCumulativeProbability(xx)*exp(-0.5*a*b);
+
+        xx=(a+b*(tt-p))/xDenominator;
+        yy=(a+b*(tt-s))/yDenominator;
+        caux1=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux1=exp(0.5*a*b)*caux1;
 
-        xx=(a-b*(tt-p))/std::sqrt(2.0*(tt-p));
-        yy=(a-b*(tt-s))/std::sqrt(2.0*(tt-s));
-        rho=std::sqrt((tt-p)/(tt-s));
-        caux2=ND2(-xx,-yy,rho);
+        xx=(a-b*(tt-p))/xDenominator;
+        yy=(a-b*(tt-s))/yDenominator;
+        caux2=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux2=exp(-0.5*a*b)*caux2;
 
-        aa=exp((b*b-(1.0-gm)*(1.0-gm))*(tt-s)/4.0);
+        const Real normalizationFactor =
+            exp((b*b-(1.0-gm)*(1.0-gm))*(tt-s)/4.0);
 
-        result=(caux+caux1+caux2)*aa;
-        return(result);
+        return (caux+caux1+caux2)*normalizationFactor;
     }
-
 
     /*
       !!
@@ -534,35 +518,38 @@ namespace QuantLib {
     */
     Real dll(Real s,Real p,Real tt,Real a,Real b,Real c,Real gm)
     {
-        Real result;
         Real aa,caux,caux1;
         Real sigmarho[4],limit[4],epsi;
 
         epsi=1.e-12;
-        limit[1]=(a+b*(tt-p))/std::sqrt(2.0*(tt-p));
-        limit[2]=(a+b*(tt-s))/std::sqrt(2.0*(tt-s));
-        limit[3]=(a+b*tt+c)/std::sqrt(2.0*tt);
-        sigmarho[1]=std::sqrt((tt-p)/(tt-s));
-        sigmarho[2]=std::sqrt((tt-p)/tt);
-        sigmarho[3]=std::sqrt((tt-s)/tt);
+        const Real pDenominator = std::sqrt(2.0*(tt-p));
+        const Real sDenominator = std::sqrt(2.0*(tt-s));
+        const Real tDenominator = std::sqrt(2.0*tt);
+        const Real pToSCorrelation = std::sqrt((tt-p)/(tt-s));
+        const Real pToTCorrelation = std::sqrt((tt-p)/tt);
+        const Real sToTCorrelation = std::sqrt((tt-s)/tt);
 
-        caux=exp(0.5*a*b)*tvtl(0,limit,sigmarho,epsi);
+        limit[1]=(a+b*(tt-p))/pDenominator;
+        limit[2]=(a+b*(tt-s))/sDenominator;
+        limit[3]=(a+b*tt+c)/tDenominator;
+        sigmarho[1]=pToSCorrelation;
+        sigmarho[2]=pToTCorrelation;
+        sigmarho[3]=sToTCorrelation;
 
-        limit[1]=(a-b*(tt-p))/std::sqrt(2.0*(tt-p));
-        limit[2]=(-a+b*(tt-s))/std::sqrt(2.0*(tt-s));
-        limit[3]=(-a+b*tt+c)/std::sqrt(2.0*tt);
-        sigmarho[1]=-std::sqrt((tt-p)/(tt-s));
-        sigmarho[2]=-std::sqrt((tt-p)/tt);
-        sigmarho[3]=std::sqrt((tt-s)/tt);
+        caux=exp(0.5*a*b)*trivariateNormalOrStudentCumulativeProbability(0,limit,sigmarho,epsi);
 
-        caux1=-exp(-0.5*a*b)*tvtl(0,limit,sigmarho,epsi);
+        limit[1]=(a-b*(tt-p))/pDenominator;
+        limit[2]=(-a+b*(tt-s))/sDenominator;
+        limit[3]=(-a+b*tt+c)/tDenominator;
+        sigmarho[1]=-pToSCorrelation;
+        sigmarho[2]=-pToTCorrelation;
+        sigmarho[3]=sToTCorrelation;
+
+        caux1=-exp(-0.5*a*b)*trivariateNormalOrStudentCumulativeProbability(0,limit,sigmarho,epsi);
 
         aa=exp((b*b-(1.0-gm)*(1.0-gm))*(tt-s)/4.0);
 
-
-        result=(caux+caux1)*aa;
-
-        return(result);
+        return (caux+caux1)*aa;
     }
 
     /*
@@ -573,51 +560,50 @@ namespace QuantLib {
     Real ddff(Real s, Real p,Real tt,Real a,Real b,Real gm)
     {
         Real aa,caux,caux1,caux2,caux3,caux4;
-        Real xx,yy,rho;
-        Real result;
+        Real xx,yy;
 
-        xx=(a-b*(tt-p))/std::sqrt(2.0*(tt-p));
-        caux=PHID(xx)*exp(-0.5*a*b);
+        const Real pDenominator = std::sqrt(2.0*(tt-p));
+        const Real sDenominator = std::sqrt(2.0*(tt-s));
+        const Real jointDenominator = std::sqrt(2.0*(tt-p)*(tt-s));
+        const Real pMinusSqrt = std::sqrt(p-s);
+        const Real pDensityScale = 2.0*std::sqrt(M_PI*(tt-p));
+        const Real sDensityScale = 2.0*std::sqrt(M_PI*(tt-s));
+        const Real xCorrelation = std::sqrt((tt-p)/(tt-s));
 
-        xx=(a+b*(tt-p))/std::sqrt(2.0*(tt-p));
-        yy=(a+b*(tt-s))/std::sqrt(2.0*(tt-s));
-        rho=std::sqrt((tt-p)/(tt-s));
-        caux1=ND2(-xx,-yy,rho);
+        xx=(a-b*(tt-p))/pDenominator;
+        caux=standardNormalCumulativeProbability(xx)*exp(-0.5*a*b);
+
+        xx=(a+b*(tt-p))/pDenominator;
+        yy=(a+b*(tt-s))/sDenominator;
+        caux1=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux1=exp(0.5*a*b)*caux1;
 
-        xx=(a-b*(tt-p))/std::sqrt(2.0*(tt-p));
-        yy=(a-b*(tt-s))/std::sqrt(2.0*(tt-s));
-        rho=std::sqrt((tt-p)/(tt-s));
-        caux2=ND2(-xx,-yy,rho);
+        xx=(a-b*(tt-p))/pDenominator;
+        yy=(a-b*(tt-s))/sDenominator;
+        caux2=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux2=-exp(-0.5*a*b)*caux2;
 
         caux=0.5*b*(caux+caux1+caux2);
 
         xx=(a+b*(tt-p))/std::sqrt(2.0*(tt-p));
-        yy=b*std::sqrt(p-s)/sqrtTwo;
-        caux1=exp(-0.5*xx*xx)*exp(0.5*a*b)*PHID(yy)/(2.0*std::sqrt(PI*(tt-p)));
+        yy=b*pMinusSqrt/M_SQRT2;
+        caux1=exp(-0.5*xx*xx)*exp(0.5*a*b)*standardNormalCumulativeProbability(yy)/pDensityScale;
 
+        xx=(a+b*(tt-s))/sDenominator;
+        yy=a*pMinusSqrt/jointDenominator;
+        caux2=exp(-0.5*xx*xx)*exp(0.5*a*b)*standardNormalCumulativeProbability(yy)/sDensityScale;
 
-        xx=(a+b*(tt-s))/std::sqrt(2.0*(tt-s));
-        yy=a*std::sqrt(p-s)/std::sqrt(2.0*(tt-p)*(tt-s));
-        caux2=exp(-0.5*xx*xx)*exp(0.5*a*b)*PHID(yy)/(2.0*std::sqrt(PI*(tt-s)));
+        xx=(a-b*(tt-p))/pDenominator;
+        yy=b*pMinusSqrt/M_SQRT2;
+        caux3=-exp(-0.5*xx*xx)*exp(-0.5*a*b)*standardNormalCumulativeProbability(yy)/pDensityScale;
 
-        xx=(a-b*(tt-p))/std::sqrt(2.0*(tt-p));
-        yy=b*std::sqrt(p-s)/sqrtTwo;
-        caux3=-exp(-0.5*xx*xx)*exp(-0.5*a*b)*PHID(yy)/(2.0*std::sqrt(PI*(tt-p)));
-
-
-        xx=(a-b*(tt-s))/std::sqrt(2.0*(tt-s));
-        yy=a*std::sqrt(p-s)/std::sqrt(2.0*(tt-p)*(tt-s));
-        caux4=exp(-0.5*xx*xx)*exp(-0.5*a*b)*PHID(yy)/(2.0*std::sqrt(PI*(tt-s)));
-
-
+        xx=(a-b*(tt-s))/sDenominator;
+        yy=a*pMinusSqrt/jointDenominator;
+        caux4=exp(-0.5*xx*xx)*exp(-0.5*a*b)*standardNormalCumulativeProbability(yy)/sDensityScale;
 
         aa=exp((b*b-(1.0-gm)*(1.0-gm))*(tt-p)/4.0);
 
-
-        result=(caux+caux1+caux2+caux3+caux4)*aa;
-        return(result);
+        return (caux+caux1+caux2+caux3+caux4)*aa;
     }
 
     /*
@@ -627,66 +613,65 @@ namespace QuantLib {
     */
     Real ddll(Real s,Real p,Real tt, Real ax, Real bx,Real c, Real gm)
     {
-        Real result;
         Real aa,caux,caux1;
         Real sigmarho[4],sigma[4],limit[4];
         int idx;
         Real epsi;
 
         epsi=1.e-12;
-        limit[1]=(ax+bx*(tt-p))/std::sqrt(2.0*(tt-p));
-        limit[2]=(ax+bx*(tt-s))/std::sqrt(2.0*(tt-s));
-        limit[3]=(ax+bx*tt+c)/std::sqrt(2.0*tt);
-        sigmarho[1]=std::sqrt((tt-p)/(tt-s));
-        sigmarho[2]=std::sqrt((tt-p)/tt);
-        sigmarho[3]=std::sqrt((tt-s)/tt);
-        sigma[1]=std::sqrt(1.0-sigmarho[1]*sigmarho[1]);
-        sigma[2]=std::sqrt(1.0-sigmarho[2]*sigmarho[2]);
-        sigma[3]=std::sqrt(1.0-sigmarho[3]*sigmarho[3]);
+        const Real pDenominator = std::sqrt(2.0*(tt-p));
+        const Real sDenominator = std::sqrt(2.0*(tt-s));
+        const Real tDenominator = std::sqrt(2.0*tt);
+        const Real pToSCorrelation = std::sqrt((tt-p)/(tt-s));
+        const Real pToTCorrelation = std::sqrt((tt-p)/tt);
+        const Real sToTCorrelation = std::sqrt((tt-s)/tt);
 
-        caux=0.5*bx*tvtl(0,limit,sigmarho,epsi);
+        limit[1]=(ax+bx*(tt-p))/pDenominator;
+        limit[2]=(ax+bx*(tt-s))/sDenominator;
+        limit[3]=(ax+bx*tt+c)/tDenominator;
+        sigmarho[1]=pToSCorrelation;
+        sigmarho[2]=pToTCorrelation;
+        sigmarho[3]=sToTCorrelation;
+        sigma[1]=std::sqrt(1.0-pToSCorrelation*pToSCorrelation);
+        sigma[2]=std::sqrt(1.0-pToTCorrelation*pToTCorrelation);
+        sigma[3]=std::sqrt(1.0-sToTCorrelation*sToTCorrelation);
 
+        caux=0.5*bx*trivariateNormalOrStudentCumulativeProbability(0,limit,sigmarho,epsi);
 
         idx=1;
-        caux=caux+derivn3(limit,sigmarho,sigma,idx)/std::sqrt(2.0*(tt-p));
+        caux=caux+derivn3(limit,sigmarho,sigma,idx)/pDenominator;
 
         idx=2;
-        caux=caux+derivn3(limit,sigmarho,sigma,idx)/std::sqrt(2.0*(tt-s));
+        caux=caux+derivn3(limit,sigmarho,sigma,idx)/sDenominator;
 
         idx=3;
-        caux=caux+derivn3(limit,sigmarho,sigma,idx)/std::sqrt(2.0*tt);
+        caux=caux+derivn3(limit,sigmarho,sigma,idx)/tDenominator;
 
         caux=exp(0.5*ax*bx)*caux;
 
-        limit[1]=(ax-bx*(tt-p))/std::sqrt(2.0*(tt-p));
-        limit[2]=(-ax+bx*(tt-s))/std::sqrt(2.0*(tt-s));
-        limit[3]=(-ax+bx*tt+c)/std::sqrt(2.0*tt);
-        sigmarho[1]=-std::sqrt((tt-p)/(tt-s));
-        sigmarho[2]=-std::sqrt((tt-p)/tt);
-        sigmarho[3]=std::sqrt((tt-s)/tt);
-        sigma[1]=std::sqrt(1.0-sigmarho[1]*sigmarho[1]);
-        sigma[2]=std::sqrt(1.0-sigmarho[2]*sigmarho[2]);
-        sigma[3]=std::sqrt(1.0-sigmarho[3]*sigmarho[3]);
+        limit[1]=(ax-bx*(tt-p))/pDenominator;
+        limit[2]=(-ax+bx*(tt-s))/sDenominator;
+        limit[3]=(-ax+bx*tt+c)/tDenominator;
+        sigmarho[1]=-pToSCorrelation;
+        sigmarho[2]=-pToTCorrelation;
+        sigmarho[3]=sToTCorrelation;
 
-        caux1=0.5*bx*tvtl(0,limit,sigmarho,epsi);
+        caux1=0.5*bx*trivariateNormalOrStudentCumulativeProbability(0,limit,sigmarho,epsi);
 
         idx=1;
-        caux1=caux1-derivn3(limit,sigmarho,sigma,idx)/std::sqrt(2.0*(tt-p));
+        caux1=caux1-derivn3(limit,sigmarho,sigma,idx)/pDenominator;
 
         idx=2;
-        caux1=caux1+derivn3(limit,sigmarho,sigma,idx)/std::sqrt(2.0*(tt-s));
-
+        caux1=caux1+derivn3(limit,sigmarho,sigma,idx)/sDenominator;
 
         idx=3;
-        caux1=caux1+derivn3(limit,sigmarho,sigma,idx)/std::sqrt(2.0*tt);
+        caux1=caux1+derivn3(limit,sigmarho,sigma,idx)/tDenominator;
 
         caux1=exp(-0.5*ax*bx)*caux1;
 
-
         aa=exp((bx*bx-(1.0-gm)*(1.0-gm))*(tt-s)/4.0);
 
-        result=(caux+caux1)*aa;
-        return(result);
+        return (caux+caux1)*aa;
     }
 
     /*
@@ -696,60 +681,55 @@ namespace QuantLib {
     */
     Real ddvv(Real s, Real p, Real tt, Real a, Real b, Real gm)
     {
-        Real result;
         Real aa,caux,caux1,caux2,caux6;
         Real caux3,caux4,caux5,aux;
-        Real xx,yy,rho;
+        Real xx,yy;
 
         aa=(a*p+b*(tt-p))/std::sqrt(2.0*p*tt*(tt-p));
-        caux=PHID(aa);
+        caux=standardNormalCumulativeProbability(aa);
 
         aa=exp(-(a-b)*(a-b)/(4.0*tt))/tt;
 
         caux=0.5*aa*caux*(a-b);
 
-        xx=(a*p+b*(tt-p))/std::sqrt(2.0*tt*p*(tt-p));
-        yy=(a*s+b*(tt-s))/std::sqrt(2.0*tt*s*(tt-s));
-        rho=std::sqrt((s*(tt-p))/(p*(tt-s)));
-        caux1=ND2(-xx,-yy,rho);
+        const Real xDenominator = std::sqrt(2.0*tt*p*(tt-p));
+        const Real yDenominator = std::sqrt(2.0*tt*s*(tt-s));
+        const Real xCorrelation = std::sqrt((s*(tt-p))/(p*(tt-s)));
+        xx=(a*p+b*(tt-p))/xDenominator;
+        yy=(a*s+b*(tt-s))/yDenominator;
+        caux1=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux1=-0.5*aa*caux1*(a-b);
-
 
         aa=exp(-(a+b)*(a+b)/(4.0*tt))/tt;
 
-        xx=(a*p-b*(tt-p))/std::sqrt(2.0*tt*p*(tt-p));
-        yy=(a*s-b*(tt-s))/std::sqrt(2.0*tt*s*(tt-s));
-        rho=std::sqrt((s*(tt-p))/(p*(tt-s)));
-        caux2=ND2(-xx,-yy,rho);
+        xx=(a*p-b*(tt-p))/xDenominator;
+        yy=(a*s-b*(tt-s))/yDenominator;
+        caux2=bivariateNormalUpperTailProbability(-xx,-yy,xCorrelation);
         caux2=-0.5*aa*caux2*(a+b);
 
         aa=-b*std::sqrt((p-s)/std::sqrt(2.0*p*s));
-        aux=std::sqrt(p/(PI*tt*(tt-p)))*PHID(aa);
+        aux=std::sqrt(p/(M_PI*tt*(tt-p)))*standardNormalCumulativeProbability(aa);
+        const Real plusExponent = exp(-(a+b)*(a+b)/(4.0*tt));
+        const Real minusExponent = exp(-(a-b)*(a-b)/(4.0*tt));
 
-        xx=(a+b)*(a+b)/(4.0*tt);
         yy=(a*p-b*(tt-p))*(a*p-b*(tt-p))/(4.0*p*tt*(tt-p));
-        caux3=aux*exp(-xx)*exp(-yy)/2.0;
+        caux3=aux*plusExponent*exp(-yy)/2.0;
 
-
-        xx=(a-b)*(a-b)/(4.0*tt);
         yy=(a*p+b*(tt-p))*(a*p+b*(tt-p))/(4.0*p*tt*(tt-p));
-        caux4=aux*exp(-xx)*exp(-yy)/2.0;
+        caux4=aux*minusExponent*exp(-yy)/2.0;
 
         aa=a*std::sqrt((p-s)/std::sqrt(2.0*(tt-p)*(tt-s)));
-        aux=std::sqrt(s/(PI*tt*(tt-s)))*PHID(aa);
+        aux=std::sqrt(s/(M_PI*tt*(tt-s)))*standardNormalCumulativeProbability(aa);
 
-        xx=(a+b)*(a+b)/(4.0*tt);
         yy=(a*s-b*(tt-s))*(a*s-b*(tt-s))/(4.0*s*tt*(tt-s));
-        caux5=aux*exp(-xx)*exp(-yy)/2.0;
+        caux5=aux*plusExponent*exp(-yy)/2.0;
 
-        xx=(a-b)*(a-b)/(4.0*tt);
         yy=(a*s+b*(tt-s))*(a*s+b*(tt-s))/(4.0*s*tt*(tt-s));
-        caux6=aux*exp(-xx)*exp(-yy)/2.0;
+        caux6=aux*minusExponent*exp(-yy)/2.0;
 
         aux=exp((1.0-gm)*(1.0-gm)*tt/4.0)*std::sqrt(tt);
 
-        result=(caux+caux1+caux2+caux3+caux4+caux5+caux6)/(aux*2.0*sqrtPi);
-        return(result);
+        return (caux+caux1+caux2+caux3+caux4+caux5+caux6)/(aux*2.0*M_SQRTPI);
     }
 
     /*
@@ -762,8 +742,7 @@ namespace QuantLib {
     {
         Real aa;
         Real xx,yy,rho,sc;
-        Real deriv;
-        sc=sqrtTwoPi;
+        sc=M_SQRT2*M_SQRTPI;
 
         if(idx==1)
             {
@@ -771,45 +750,40 @@ namespace QuantLib {
                 xx=(limit[3]-sigmarho[2]*limit[1])/sigma[2];
                 yy=(limit[2]-sigmarho[1]*limit[1])/sigma[1];
                 rho=(sigmarho[3]-sigmarho[1]*sigmarho[2])/(sigma[1]*sigma[2]);
-                deriv=aa*ND2(-xx,-yy,rho)/sc;
+            }
+        else if(idx==2)
+            {
+                aa=exp(-0.5*limit[2]*limit[2]);
+                xx=(limit[1]-sigmarho[1]*limit[2])/sigma[1];
+                yy=(limit[3]-sigmarho[3]*limit[2])/sigma[3];
+                rho=(sigmarho[2]-sigmarho[1]*sigmarho[3])/(sigma[1]*sigma[3]);
             }
         else
             {
-                if(idx==2)
-                    {
-                        aa=exp(-0.5*limit[2]*limit[2]);
-                        xx=(limit[1]-sigmarho[1]*limit[2])/sigma[1];
-                        yy=(limit[3]-sigmarho[3]*limit[2])/sigma[3];
-                        rho=(sigmarho[2]-sigmarho[1]*sigmarho[3])/(sigma[1]*sigma[3]);
-                        deriv=aa*ND2(-xx,-yy,rho)/sc;
-                    }
-                else
-                    {
-                        //!!! idx=3
-                        aa=exp(-0.5*limit[3]*limit[3]);
-
-                        xx=(limit[1]-sigmarho[2]*limit[3])/sigma[2];
-                        yy=(limit[2]-sigmarho[3]*limit[3])/sigma[3];
-                        rho=(sigmarho[1]-sigmarho[2]*sigmarho[3])/(sigma[2]*sigma[3]);
-                        deriv=aa*ND2(-xx,-yy,rho)/sc;
-                    }
-
+                // idx=3
+                aa=exp(-0.5*limit[3]*limit[3]);
+                xx=(limit[1]-sigmarho[2]*limit[3])/sigma[2];
+                yy=(limit[2]-sigmarho[3]*limit[3])/sigma[3];
+                rho=(sigmarho[1]-sigmarho[2]*sigmarho[3])/(sigma[2]*sigma[3]);
             }
-        return(deriv);
+        return aa*bivariateNormalUpperTailProbability(-xx,-yy,rho)/sc;
     }
 
-
-    Real BVTL(int NU, Real DH, Real DK, Real RRR );
-    Real TVTMFN(Real X, Real H1, Real H2, Real H3,
+    Real bivariateStudentCumulativeProbability(int NU, Real DH, Real DK, Real RRR );
+    Real trivariatePlackettIntegrand(Real X, Real H1, Real H2, Real H3,
                   Real R23, Real RUA, Real RUB, Real AR,
                   Real RUC, int NUC);
     template <class Integrand>
-    Real KRNRDT(Real A, Real B, const Integrand& integrand, Real& error);
+    Real gaussKronrodEstimate(Real A, Real B, const Integrand& integrand, Real& error);
 
     template <class Integrand>
-    Real ADONET(Real A, Real B, Real TOL, const Integrand& integrand);
+    Real adaptiveGaussKronrodIntegral(Real A, Real B, Real TOL, const Integrand& integrand);
 
-    Real tvtl(int NU, const Real limit[4], const Real sigmarho[4], Real epsi) {
+    Real trivariateNormalOrStudentCumulativeProbability(
+        int degreesOfFreedom,
+        const Real limit[4],
+        const Real sigmarho[4],
+        Real tolerance) {
         /*
           A function for computing trivariate normal and t-probabilities.
 
@@ -838,93 +812,105 @@ namespace QuantLib {
           The software calculates the probability that
           X(I) < H(I), for I = 1,2,3
 
-          NU        INTEGER degrees of freedom; use NU = 0 for normal cases.
-          LIMIT     REAL array of uppoer limits for probability distribution
-          SIGMARHO  REAL array of three correlation coefficients, should
-          contain the lower left portion of the correlation matrix.
-          SIGMARHO should contains the values r21, r31, r23 in that order.
-          EPSI      REAL required absolute accuracy; maximum accuracy for most
+          degreesOfFreedom is the number of degrees of freedom; use 0 for normal cases.
+          limit       contains the upper limits for the probability distribution.
+          sigmarho    contains the lower-left correlation coefficients r21, r31, r23.
+          tolerance is the required absolute accuracy; maximum accuracy for most
           computations is approximately 1D-14
 
         */
 
-        Real result;
-        const Real ONE=1.0, ZRO=0.0;
-        Real EPS, TVT;
-        Real PT, H1, H2, H3, R12, R13, R23, RUA, RUB, AR, RUC;
-        EPS = max( 1.e-14, epsi );
-        PT=halfPi;
-
-        H1 = limit[1];
-        H2 = limit[2];
-        H3 = limit[3];
-        R12 = sigmarho[1];
-        R13 = sigmarho[2];
-        R23 = sigmarho[3];
+        const Real zero = 0.0;
+        const Real one = 1.0;
+        const Real halfPi = M_PI_2;
+        const Real epsilon = max(1.e-14, tolerance);
+        Real probability = zero;
+        Real h1 = limit[1], h2 = limit[2], h3 = limit[3];
+        Real r12 = sigmarho[1], r13 = sigmarho[2], r23 = sigmarho[3];
+        Real rua, rub, ar, ruc;
         /*
          *     Sort R's and check for special cases
          */
-        if ( fabs(R12) > fabs(R13) ) {
-            H2 = H3;
-            H3 = limit[2];
-            R12 = R13;
-            R13 = sigmarho[1];
+        if (fabs(r12) > fabs(r13)) {
+            h2 = h3;
+            h3 = limit[2];
+            r12 = r13;
+            r13 = sigmarho[1];
         }
 
-        if ( fabs(R13) > fabs(R23) ) {
-            H1 = H2;
-            H2 = limit[1];
-            R23 = R13;
-            R13 = sigmarho[3];
+        if (fabs(r13) > fabs(r23)) {
+            h1 = h2;
+            h2 = limit[1];
+            r23 = r13;
+            r13 = sigmarho[3];
         }
 
-        TVT = 0.0;
-        if ( (fabs(H1) + fabs(H2) + fabs(H3)) < EPS ) TVT = ( 1 + ( asin(R12) + asin(R13) + asin(R23) )/PT )/8.0;
+        const bool limitsNearZero = (fabs(h1) + fabs(h2) + fabs(h3)) < epsilon;
+        const bool r12AndR13NearZero = degreesOfFreedom < 1 &&
+            (fabs(r12) + fabs(r13)) < epsilon;
+        const bool r13AndR23NearZero = degreesOfFreedom < 1 &&
+            (fabs(r13) + fabs(r23)) < epsilon;
+        const bool r12AndR23NearZero = degreesOfFreedom < 1 &&
+            (fabs(r12) + fabs(r23)) < epsilon;
+        const bool r23NearOne = (1.0 - r23) < epsilon;
+        const bool r23NearMinusOne = (r23 + 1.0) < epsilon;
 
-        else  if ( (NU < 1) && ( (fabs(R12) + fabs(R13)) < EPS) )  TVT = PHID(H1)*BVTL( NU, H2, H3, R23 );
-
-        else  if ( (NU < 1) && ((fabs(R13) + fabs(R23))< EPS) ) TVT = PHID(H3)*BVTL( NU, H1, H2, R12 );
-
-        else if( (NU < 1) && ((fabs(R12) + fabs(R23))< EPS) ) TVT = PHID(H2)*BVTL( NU, H1, H3, R13 );
-
-        else if ( (1.0 - R23)< EPS ) TVT = BVTL( NU, H1, min( H2, H3 ), R12 );
-
-        else  if ( (R23 + 1.0) <EPS ) {
-            if  ( H2 > -H3 ) TVT = BVTL( NU, H1, H2, R12 ) - BVTL( NU, H1, -H3, R12 );}
-        else
-            {
-                /*
-                 *        Compute singular TVT value
-                 */
-                if ( NU < 1 ) TVT = BVTL( NU, H2, H3, R23 )*PHID(H1);
-
-                else if ( R23 > 0 ) TVT = BVTL( NU, H1, min( H2, H3 ), ZRO );
-
-                else if ( H2 > -H3 ) TVT = BVTL( NU, H1, H2, ZRO ) - BVTL( NU, H1, -H3, ZRO );
-
-                /*
-                 *        Use numerical integration to compute probability
-                 *
-                 */
-                RUA = asin( R12 );
-                RUB = asin( R13 );
-                AR = asin( R23);
-                RUC = SIGN( PT, AR ) - AR;
-                const auto integrand = [&](Real X) {
-                    return TVTMFN(X, H1, H2, H3, R23, RUA, RUB, AR, RUC, NU);
-                };
-                TVT = TVT + ADONET(ZRO, ONE, EPS, integrand) / (4.0 * PT);
+        if (limitsNearZero) {
+            probability = (one + (asin(r12) + asin(r13) + asin(r23)) / halfPi) / 8.0;
+        } else if (r12AndR13NearZero) {
+            probability = standardNormalCumulativeProbability(h1) *
+                bivariateStudentCumulativeProbability(degreesOfFreedom, h2, h3, r23);
+        } else if (r13AndR23NearZero) {
+            probability = standardNormalCumulativeProbability(h3) *
+                bivariateStudentCumulativeProbability(degreesOfFreedom, h1, h2, r12);
+        } else if (r12AndR23NearZero) {
+            probability = standardNormalCumulativeProbability(h2) *
+                bivariateStudentCumulativeProbability(degreesOfFreedom, h1, h3, r13);
+        } else if (r23NearOne) {
+            probability = bivariateStudentCumulativeProbability(
+                degreesOfFreedom, h1, min(h2, h3), r12);
+        } else if (r23NearMinusOne) {
+            if (h2 > -h3) {
+                probability = bivariateStudentCumulativeProbability(degreesOfFreedom, h1, h2, r12) -
+                    bivariateStudentCumulativeProbability(degreesOfFreedom, h1, -h3, r12);
             }
-        result = max( ZRO, min( TVT, ONE ) );
+        } else {
+            /*
+             * Compute the singular-case probability.
+             */
+            if (degreesOfFreedom < 1) {
+                probability = bivariateStudentCumulativeProbability(degreesOfFreedom, h2, h3, r23) *
+                    standardNormalCumulativeProbability(h1);
+            } else if (r23 > 0) {
+                probability = bivariateStudentCumulativeProbability(
+                    degreesOfFreedom, h1, min(h2, h3), zero);
+            } else if (h2 > -h3) {
+                probability = bivariateStudentCumulativeProbability(degreesOfFreedom, h1, h2, zero) -
+                    bivariateStudentCumulativeProbability(degreesOfFreedom, h1, -h3, zero);
+            }
 
-        return(result);
+            /*
+             * Use numerical integration to compute probability.
+             */
+            rua = asin(r12);
+            rub = asin(r13);
+            ar = asin(r23);
+            ruc = signedMagnitude(halfPi, ar) - ar;
+            const auto integrand = [&](Real x) {
+                return trivariatePlackettIntegrand(
+                    x, h1, h2, h3, r23, rua, rub, ar, ruc, degreesOfFreedom);
+            };
+            probability += adaptiveGaussKronrodIntegral(zero, one, epsilon, integrand) /
+                (4.0 * halfPi);
+        }
+        return max(zero, min(probability, one));
     }
 
-    void SINCS(Real v1,Real& v2, Real& v3);
-    Real PNTGND(int , Real ,Real ,Real ,
+    void sineAndCosineSquared(Real v1,Real& v2, Real& v3);
+    Real plackettProbabilityIntegrand(int , Real ,Real ,Real ,
                   Real ,Real ,Real ,Real );
 
-    Real TVTMFN(Real X, Real H1, Real H2, Real H3, Real R23,
+    Real trivariatePlackettIntegrand(Real X, Real H1, Real H2, Real H3, Real R23,
                   Real RUA, Real RUB, Real AR,Real RUC, int NUC ){
         /*
           Computes Plackett formula integrands
@@ -934,34 +920,32 @@ namespace QuantLib {
         const Real ZRO = 0.0;
         Real result = 0.0;
 
-        SINCS( RUA*X, R12, RR2 );
-        SINCS( RUB*X, R13, RR3 );
+        sineAndCosineSquared( RUA*X, R12, RR2 );
+        sineAndCosineSquared( RUB*X, R13, RR3 );
 
-        if ( fabs(RUA)> 0 )  result += RUA*PNTGND( NUC, H1,H2,H3, R13,R23,R12,RR2);
-        if( fabs(RUB)>0 ) result += RUB*PNTGND( NUC, H1,H3,H2, R12,R23,R13,RR3 ) ;
+        if ( fabs(RUA)> 0 )  result += RUA*plackettProbabilityIntegrand( NUC, H1,H2,H3, R13,R23,R12,RR2);
+        if( fabs(RUB)>0 ) result += RUB*plackettProbabilityIntegrand( NUC, H1,H3,H2, R12,R23,R13,RR3 ) ;
         if ( NUC > 0 )
             {
-                SINCS( AR + RUC*X, R, RR );
-                result -= RUC*PNTGND( NUC, H2, H3, H1, ZRO, ZRO, R, RR );
+                sineAndCosineSquared( AR + RUC*X, R, RR );
+                result -= RUC*plackettProbabilityIntegrand( NUC, H2, H3, H1, ZRO, ZRO, R, RR );
             }
         return(result);
     }
     //
 
-
-    void SINCS(Real X, Real& SX, Real& CS )
+    void sineAndCosineSquared(Real X, Real& SX, Real& CS )
     {
         /*
           Computes SIN(X), COS(X)^2, with series approx. for |X| near PI/2
         */
-        constexpr double PT = 1.57079632679489661923132169163975;
-        Real EE;
-        EE = (PT - fabs(X))*(PT - fabs(X));
+        const Real distanceToHalfPi = (M_PI_2 - fabs(X)) * (M_PI_2 - fabs(X));
 
-        if ( EE < 5e-5 )
+        if (distanceToHalfPi < 5e-5)
             {
-                SX = SIGN( 1 - EE*( 1 - EE/12 )/2, X );
-                CS = EE*( 1 - EE*( 1 - 2*EE/15 )/3 );
+                SX = signedMagnitude(1 - distanceToHalfPi * (1 - distanceToHalfPi / 12) / 2, X);
+                CS = distanceToHalfPi *
+                    (1 - distanceToHalfPi * (1 - 2 * distanceToHalfPi / 15) / 3);
             }
         else
             {
@@ -972,15 +956,14 @@ namespace QuantLib {
     //
 
     template <class Integrand>
-    Real ADONET(Real A, Real B, Real TOL, const Integrand& integrand) {
+    Real adaptiveGaussKronrodIntegral(Real A, Real B, Real TOL, const Integrand& integrand) {
         //
         //     One Dimensional Globally Adaptive Integration Function
         //
         const Size NL=100;
         Size I, IM, IP;
         Real EI[101], AI[101], BI[101], FI[101], FIN=0.0;
-        Real result,ERR;
-
+        Real ERR;
 
         AI[1] = A;
         BI[1] = B;
@@ -993,8 +976,8 @@ namespace QuantLib {
                 BI[IM] = BI[IP];
                 AI[IM] = (AI[IP] + BI[IP] )/2.0;
                 BI[IP] = AI[IM];
-                FI[IP] = KRNRDT(AI[IP], BI[IP], integrand, EI[IP]);
-                FI[IM] = KRNRDT(AI[IM], BI[IM], integrand, EI[IM]);
+                FI[IP] = gaussKronrodEstimate(AI[IP], BI[IP], integrand, EI[IP]);
+                FI[IM] = gaussKronrodEstimate(AI[IM], BI[IM], integrand, EI[IM]);
 
                 ERR = 0.0;
                 FIN = 0.0;
@@ -1006,21 +989,19 @@ namespace QuantLib {
                     }
                 ERR = std::sqrt(ERR);
             }
-        result=FIN;
-        //   ADONET = FIN
-        return(result);
+        //   adaptiveGaussKronrodIntegral = FIN
+        return FIN;
     }
     //
 
     template <class Integrand>
-    Real KRNRDT(Real A, Real B, const Integrand& integrand, Real& ERR) {
+    Real gaussKronrodEstimate(Real A, Real B, const Integrand& integrand, Real& ERR) {
 
         //
         //     Kronrod Rule
         //
         Real T, CEN, FC, WID, RESG, RESK;
 
-        Real result;
         //
         //        The abscissae and weights are given for the interval (-1,1);
         //        only positive abscissae and corresponding weights are given.
@@ -1079,13 +1060,12 @@ namespace QuantLib {
                 RESK = RESK + WGK[J+1]*FC;
                 if((J-2*int(J/2)) == 0 ) RESG = RESG + WG[1+J/2]*FC;
             }
-        result = WID*RESK;
         ERR = fabs( WID*( RESK - RESG ) );
-        return(result);
+        return WID*RESK;
     }
 
     //
-    Real  STUDNT(int NU, Real T )
+    Real  studentCumulativeProbability(int NU, Real T )
     {
         /*
           Student t Distribution Function
@@ -1094,9 +1074,8 @@ namespace QuantLib {
         Real CSSTHE, SNTHE, POLYN, TT, TS, RN;
         Real result;
 
-
-        if ( NU < 1 ) result= PHID( T );
-        else if ( NU == 1 ) result = ( 1 + 2.0*atan(T)/PI )/2.0;
+        if ( NU < 1 ) result= standardNormalCumulativeProbability( T );
+        else if ( NU == 1 ) result = ( 1 + 2.0*atan(T)/M_PI )/2.0;
         else if ( NU == 2 ) result = ( 1 + T/std::sqrt(2.0 + T*T))/2.0;
         else
             {
@@ -1111,7 +1090,7 @@ namespace QuantLib {
                     {
                         RN = NU;
                         TS = T/std::sqrt(RN);
-                        result = ( 1.0 + 2.0*( atan(TS) + TS*CSSTHE*POLYN )/PI )/2.0;
+                        result = ( 1.0 + 2.0*( atan(TS) + TS*CSSTHE*POLYN )/M_PI )/2.0;
                     }
                 else
                     {
@@ -1124,7 +1103,7 @@ namespace QuantLib {
     }
 
     //
-    Real BVTL(int NU, Real DH, Real DK, Real R )
+    Real bivariateStudentCumulativeProbability(int NU, Real DH, Real DK, Real R )
     {
         /*
           A function for computing bivariate t probabilities.
@@ -1144,7 +1123,7 @@ namespace QuantLib {
           the website: www.math.wsu.edu/faculty/genz/software/software.html
           ***
 
-          BVTL - calculate the probability that X < DH and Y < DK.
+          bivariateStudentCumulativeProbability - calculate the probability that X < DH and Y < DK.
 
           parameters
 
@@ -1153,29 +1132,27 @@ namespace QuantLib {
           DK 2nd lower integration limit
           R   correlation coefficient
         */
-        Real TPI, ORS, HRK, KRH, BVT, SNU;
+        Real ORS, HRK, KRH, BVT;
         Real GMPH, GMPK, XNKH, XNHK, QHRK, HKN, HPK, HKRN;
         Real BTNCKH, BTNCHK, BTPDKH, BTPDHK, ONE, EPS;
         Real result;
         ONE = 1;
         EPS = 1e-15;
-        if ( NU <1 ) result = ND2( -DH, -DK, R );
+        if ( NU <1 ) result = bivariateNormalUpperTailProbability( -DH, -DK, R );
 
-        else if ( (1 - R)<= EPS ) result = STUDNT( NU, min( DH, DK ) );
+        else if ( (1 - R)<= EPS ) result = studentCumulativeProbability( NU, min( DH, DK ) );
 
         else  if( (R + 1)<=EPS )
             {
-                if( DH > -DK ) result = STUDNT( NU, DH ) - STUDNT( NU, -DK );
+                if( DH > -DK ) result = studentCumulativeProbability( NU, DH ) - studentCumulativeProbability( NU, -DK );
                 else
                     result = 0.0;
             }
         else
             {
-                const int HS = static_cast<int>(SIGN(ONE, DH - R*DK));
-                const int KS = static_cast<int>(SIGN(ONE, DK - R*DH));
-                TPI = twoPi;
-                SNU = (double)NU;
-                SNU = std::sqrt(SNU);
+                const int HS = static_cast<int>(signedMagnitude(ONE, DH - R*DK));
+                const int KS = static_cast<int>(signedMagnitude(ONE, DK - R*DH));
+                const Real sqrtDegreesOfFreedom = std::sqrt(static_cast<Real>(NU));
                 ORS = 1.0 - R*R;
                 HRK = DH - R*DK;
                 KRH = DK - R*DH;
@@ -1192,13 +1169,13 @@ namespace QuantLib {
 
                 if((NU-2*(int)(NU/2))==0 )
                     {
-                        BVT = atan2( std::sqrt(ORS), -R )/TPI;
+                        BVT = atan2( std::sqrt(ORS), -R )/M_TWOPI;
                         GMPH = DH/std::sqrt(16*( NU + DH*DH ));
                         GMPK = DK/std::sqrt(16*( NU + DK*DK));
-                        BTNCKH = 2*atan2( std::sqrt(XNKH), std::sqrt(1-XNKH) )/PI;
-                        BTPDKH = 2*std::sqrt(XNKH*(1-XNKH))/PI;
-                        BTNCHK = 2*atan2( std::sqrt(XNHK), std::sqrt(1-XNHK) )/PI;
-                        BTPDHK = 2*std::sqrt(XNHK*(1-XNHK))/PI;
+                        BTNCKH = 2*atan2( std::sqrt(XNKH), std::sqrt(1-XNKH) )/M_PI;
+                        BTPDKH = 2*std::sqrt(XNKH*(1-XNKH))/M_PI;
+                        BTNCHK = 2*atan2( std::sqrt(XNHK), std::sqrt(1-XNHK) )/M_PI;
+                        BTPDHK = 2*std::sqrt(XNHK*(1-XNHK))/M_PI;
                         for (int J = 1; J <= NU/2; ++J)
                             {
                                 BVT = BVT + GMPH*( 1 + KS*BTNCKH );
@@ -1217,10 +1194,10 @@ namespace QuantLib {
                         HKRN = DH*DK + R*NU ;
                         HKN = DH*DK - NU;
                         HPK = DH + DK;
-                        BVT = atan2( -SNU*( HKN*QHRK + HPK*HKRN ),HKN*HKRN-NU*HPK*QHRK )/TPI;
+                        BVT = atan2( -sqrtDegreesOfFreedom*( HKN*QHRK + HPK*HKRN ),HKN*HKRN-NU*HPK*QHRK )/M_TWOPI;
                         if ( BVT < -EPS ) BVT = BVT + 1;
-                        GMPH = DH/( TPI*SNU*( 1 + DH*DH/NU ) );
-                        GMPK = DK/( TPI*SNU*( 1 + DK*DK/NU ) );
+                        GMPH = DH/( M_TWOPI*sqrtDegreesOfFreedom*( 1 + DH*DH/NU ) );
+                        GMPK = DK/( M_TWOPI*sqrtDegreesOfFreedom*( 1 + DK*DK/NU ) );
                         BTNCKH = std::sqrt(XNKH);
                         BTPDKH = BTNCKH;
                         BTNCHK = std::sqrt(XNHK);
@@ -1244,10 +1221,7 @@ namespace QuantLib {
 
     }
 
-
-
-
-      Real PNTGND(int NUC, Real BA, Real BB, Real BC, Real RA, Real RB, Real R, Real RR) {
+      Real plackettProbabilityIntegrand(int NUC, Real BA, Real BB, Real BC, Real RA, Real RB, Real R, Real RR) {
           /*
             Computes Plackett formula integrand
           */
@@ -1261,20 +1235,18 @@ namespace QuantLib {
               if( NUC<1 ) {
                   if ( (BT > -10) && (FT <100) ) {
                       result = exp( -FT/2 );
-                      if ( BT <10 ) result= result*PHID(BT);
+                      if ( BT <10 ) result= result*standardNormalCumulativeProbability(BT);
                   } else {
                       FT = std::sqrt(1 + FT/NUC);
-                      result = STUDNT( NUC, BT/FT )/std::pow(FT,NUC);
+                      result = studentCumulativeProbability( NUC, BT/FT )/std::pow(FT,NUC);
                   }
               }
           }
           return(result);
       }
 
-
-
     //***********************************************************
-    Real ND2(Real a, Real b, Real rho ){
+    Real bivariateNormalUpperTailProbability(Real a, Real b, Real rho ){
         /*
          *     A function for computing bivariate normal probabilities.
          *     This function is based on the method described by
@@ -1293,8 +1265,8 @@ namespace QuantLib {
          *     www.math.wsu.edu/faculty/genz/software/software.html
          *
          *
-         *      ND2 calculates the probability that X > DH and Y > DK.
-         *      Note: Prob( X < DH, Y < DK ) = ND2( -DH, -DK, R ).
+         *      bivariateNormalUpperTailProbability calculates the probability that X > DH and Y > DK.
+         *      Note: Prob( X < DH, Y < DK ) = bivariateNormalUpperTailProbability( -DH, -DK, R ).
          *
          * Parameters
          *
@@ -1302,7 +1274,7 @@ namespace QuantLib {
          *   DK  DOUBLE PRECISION, integration limit
          *   R   DOUBLE PRECISION, correlation coefficient
          */
-        Real result, DK, DH, R;
+        Real DK, DH, R;
         int I, IS, LG, NG;
 
         static const Real XL[11][4] = {
@@ -1364,11 +1336,11 @@ namespace QuantLib {
 
                     }
                 }
-                BVN = BVN*ASR/( 2*twoPi );
+                BVN = BVN*ASR/( 2*M_TWOPI );
 
             }
 
-            BVN = BVN + PHID(-H)*PHID(-K);
+            BVN = BVN + standardNormalCumulativeProbability(-H)*standardNormalCumulativeProbability(-K);
 
         }
         else
@@ -1389,7 +1361,7 @@ namespace QuantLib {
                     if( ASR > -100 ) BVN = AA*exp(ASR)*( 1 - C*( BS - AS )*( 1 - D*BS/5 )/3 + C*D*AS*AS/5 );
                     if( -HK<100 ){
                         BB = std::sqrt(BS);
-                        BVN = BVN - exp( -HK/2 )*sqrtTwoPi*PHID(-BB/AA)*BB*( 1 - C*BS*( 1 - D*BS/5 )/3 );
+                        BVN = BVN - exp( -HK/2 )*(M_SQRT2*M_SQRTPI)*standardNormalCumulativeProbability(-BB/AA)*BB*( 1 - C*BS*( 1 - D*BS/5 )/3 );
                     }
                     AA = AA/2   ;
                     for (I = 1; I<= LG;I++){
@@ -1401,28 +1373,24 @@ namespace QuantLib {
 
                                 BVN = BVN + AA*WL[I][NG]*exp( ASR )*(exp( -HK*( 1 - RS )/( 2*( 1 + RS ) ) )/RS- ( 1 + C*XS*( 1 + D*XS ) ) );
 
-
                             }
                         }
                     }
-                    BVN = -BVN/twoPi;
+                    BVN = -BVN/M_TWOPI;
                 }
                 if ( R > 0 )  {
 
-                    BVN =  BVN + PHID( -max( H, K ) );
+                    BVN =  BVN + standardNormalCumulativeProbability( -max( H, K ) );
 
                 }
                 else
                     {
                         BVN = -BVN;
-                        if( K > H ) BVN = BVN + PHID(K) - PHID(H);
+                        if( K > H ) BVN = BVN + standardNormalCumulativeProbability(K) - standardNormalCumulativeProbability(H);
                     }
             }
 
-
-        result=BVN;
-
-        return(result);
+        return BVN;
 
     }
 
@@ -1481,7 +1449,6 @@ namespace QuantLib {
         };
 
     }
-
 
     PerturbativeBarrierOptionEngine::PerturbativeBarrierOptionEngine(
                 ext::shared_ptr<GeneralizedBlackScholesProcess> process, Natural order,
