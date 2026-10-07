@@ -53,7 +53,7 @@ namespace QuantLib {
             Size size = matrix.rows();
             QL_REQUIRE(size == pseudo.rows(),
                        "matrix/pseudo mismatch: matrix rows are " << size <<
-                       " while pseudo columns are " << pseudo.columns());
+                       " while pseudo rows are " << pseudo.rows());
             Size pseudoCols = pseudo.columns();
 
             // row normalization
